@@ -883,10 +883,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const saved = localStorage.getItem('axon_workspace_history_v1');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) return parsed;
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
       }
     } catch {}
-    return [];
+    const defaultSnippet: WorkspaceSnippetHistoryItem = {
+      id: 'snip-initial-starter',
+      title: 'AXON Workspace System Report',
+      code: `// AXON Workspace Engine\n// Safe client-side execution & rapid prototyping\n\nfunction generateSystemReport() {\n  return {\n    engine: 'AXON Unified Intelligence',\n    status: 'Operational',\n    timestamp: new Date().toLocaleTimeString(),\n    mode: 'Unified Workspace Code & Preview'\n  };\n}\n\nreturn generateSystemReport();`,
+      language: 'javascript',
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', month: 'short', day: 'numeric' }),
+      source: 'custom',
+      lineCount: 13,
+      byteSize: 310,
+    };
+    try {
+      localStorage.setItem('axon_workspace_history_v1', JSON.stringify([defaultSnippet]));
+    } catch {}
+    return [defaultSnippet];
   });
 
   const addWorkspaceSnippetHistory = useCallback((entry: Omit<WorkspaceSnippetHistoryItem, 'id' | 'timestamp'>) => {

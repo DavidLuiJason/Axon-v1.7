@@ -164,6 +164,41 @@ export const WorkspacePane: React.FC = () => {
   const [htmlConsoleLogs, setHtmlConsoleLogs] = useState<ConsoleLog[]>([]);
   const lastAutoLoadedCodeRef = useRef<string>('');
 
+  // Persistent Code History inline display toggle
+  const [showInlineHistory, setShowInlineHistory] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('axon_workspace_show_inline_history_v1');
+      if (saved !== null) return saved === 'true';
+    } catch {}
+    return true;
+  });
+
+  const toggleInlineHistory = () => {
+    setShowInlineHistory((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('axon_workspace_show_inline_history_v1', String(next));
+      } catch {}
+      return next;
+    });
+  };
+
+  const handleSnapshotCurrent = () => {
+    if (!workspaceCode.trim()) {
+      showToast('No code to save to history');
+      return;
+    }
+    const firstLine = workspaceCode.split('\n')[0].replace(/^\/\/\s*|^<!--\s*|^#\s*/, '').trim();
+    const title = firstLine && firstLine.length < 50 ? firstLine : `Saved ${workspaceMode.toUpperCase()} Snapshot`;
+    addWorkspaceSnippetHistory({
+      title,
+      code: workspaceCode,
+      language: workspaceMode,
+      source: 'editor_save',
+    });
+    showToast('Saved current code snapshot to history');
+  };
+
   // Terminal logs for JS/JSON modes
   const [logs, setLogs] = useState<ConsoleLog[]>([
     {
@@ -300,8 +335,20 @@ export const WorkspacePane: React.FC = () => {
     setWorkspaceExecutionError(null);
     if (newMode === 'html' && !workspaceCode.includes('<html')) {
       setWorkspaceCode(DEFAULT_HTML_CODE);
+      addWorkspaceSnippetHistory({
+        title: 'HTML Starter Canvas',
+        code: DEFAULT_HTML_CODE,
+        language: 'html',
+        source: 'custom',
+      });
     } else if (newMode === 'javascript' && workspaceCode.includes('<!DOCTYPE html>')) {
       setWorkspaceCode(DEFAULT_JS_CODE);
+      addWorkspaceSnippetHistory({
+        title: 'JavaScript Starter Script',
+        code: DEFAULT_JS_CODE,
+        language: 'javascript',
+        source: 'custom',
+      });
     }
   };
 
@@ -357,6 +404,18 @@ export const WorkspacePane: React.FC = () => {
     setWorkspaceExecutionError(null);
     const startTime = performance.now();
     const timestamp = new Date().toLocaleTimeString();
+
+    // Ensure the executed code is recorded in persistent snippet history
+    if (workspaceCode.trim()) {
+      const firstLine = workspaceCode.split('\n')[0].replace(/^\/\/\s*|^<!--\s*|^#\s*/, '').trim();
+      const snippetTitle = firstLine && firstLine.length < 50 ? firstLine : `Workspace ${workspaceMode.toUpperCase()} Snippet`;
+      addWorkspaceSnippetHistory({
+        title: snippetTitle,
+        code: workspaceCode,
+        language: workspaceMode,
+        source: 'editor_run',
+      });
+    }
 
     if (workspaceMode === 'html') {
       const elapsed = Math.round(performance.now() - startTime);
@@ -808,6 +867,133 @@ export const WorkspacePane: React.FC = () => {
                 </div>
               </div>
             )}
+
+            {/* Persistent Code History: list of every snippet loaded into Code view, most recent first, reloadable on tap */}
+            <div
+              id="workspace-persistent-code-history"
+              className="shrink-0 rounded-xl bg-neutral-950 border border-neutral-800/80 overflow-hidden shadow-xs flex flex-col transition-all"
+            >
+              {/* History Bar Header */}
+              <div
+                onClick={toggleInlineHistory}
+                className="flex items-center justify-between px-3 py-2 bg-neutral-900/60 border-b border-neutral-800/80 cursor-pointer hover:bg-neutral-900/90 transition-colors select-none"
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <History className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                  <span className="text-xs font-semibold text-neutral-200">Code History</span>
+                  <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-neutral-800 border border-neutral-700 text-neutral-300 font-mono shrink-0">
+                    {workspaceSnippetHistory.length}
+                  </span>
+                  <span className="text-[10px] text-neutral-500 hidden sm:inline truncate">
+                    • Most recent first • Tap snippet to reload
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleSnapshotCurrent();
+                    }}
+                    className="px-2 py-0.5 rounded text-[10px] bg-neutral-800 hover:bg-neutral-700 text-neutral-300 border border-neutral-700 transition-colors"
+                    title="Snapshot current editor code to history"
+                  >
+                    Snapshot
+                  </button>
+                  <div className="flex items-center gap-1 text-[10px] text-neutral-400 pl-1">
+                    <span>{showInlineHistory ? 'Collapse' : 'Expand'}</span>
+                    <ChevronDown
+                      className={`w-3.5 h-3.5 text-neutral-400 transition-transform duration-200 ${
+                        showInlineHistory ? 'rotate-180' : ''
+                      }`}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Snippet List (most recent first, reloadable on tap) */}
+              {showInlineHistory && (
+                <div className="max-h-44 sm:max-h-52 overflow-y-auto divide-y divide-neutral-900/80 p-1.5 space-y-1">
+                  {workspaceSnippetHistory.length === 0 ? (
+                    <div className="p-3 text-center text-neutral-500 text-xs">
+                      No code snippets in history yet. Generated or loaded code will automatically appear here.
+                    </div>
+                  ) : (
+                    workspaceSnippetHistory.map((item) => {
+                      const isActive = workspaceCode.trim() === item.code.trim();
+                      return (
+                        <div
+                          key={item.id}
+                          onClick={() => handleLoadFromHistory(item)}
+                          className={`w-full text-left p-2 rounded-lg flex items-center justify-between gap-2.5 transition-all cursor-pointer group ${
+                            isActive
+                              ? 'bg-neutral-900 border border-neutral-700/80 shadow-xs'
+                              : 'hover:bg-neutral-900/60 border border-transparent hover:border-neutral-800'
+                          }`}
+                          title={`Tap to load "${item.title}" into Code view`}
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span
+                                className={`text-xs font-semibold truncate ${
+                                  isActive ? 'text-white' : 'text-neutral-300 group-hover:text-white'
+                                }`}
+                              >
+                                {item.title}
+                              </span>
+                              <span className="text-[9px] uppercase font-mono px-1.5 py-0.2 rounded bg-neutral-800 border border-neutral-700 text-neutral-300">
+                                {item.language}
+                              </span>
+                              {isActive && (
+                                <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-950/90 text-emerald-300 border border-emerald-800/70 font-mono flex items-center gap-1">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                                  Active
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2 mt-0.5 text-[10px] text-neutral-500 font-mono">
+                              <span>{item.timestamp}</span>
+                              <span>•</span>
+                              <span>{item.lineCount || item.code.split('\n').length} lines</span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleLoadFromHistory(item);
+                              }}
+                              className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-all shadow-xs ${
+                                isActive
+                                  ? 'bg-neutral-800 text-neutral-300 hover:bg-neutral-700'
+                                  : 'bg-white text-black hover:bg-neutral-200'
+                              }`}
+                              title="Re-load snippet into active Code view"
+                            >
+                              {isActive ? 'Loaded' : 'Tap to Load'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                deleteWorkspaceSnippetHistoryItem(item.id);
+                                showToast('Snippet removed from history');
+                              }}
+                              className="p-1 rounded text-neutral-500 hover:text-red-400 hover:bg-neutral-800 transition-colors opacity-0 group-hover:opacity-100"
+                              title="Delete snippet"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              )}
+            </div>
           </div>
 
           {/* ========================================================================= */}
