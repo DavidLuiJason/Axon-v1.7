@@ -79,6 +79,8 @@ export interface ChatMessage {
   isRateLimitedNotice?: boolean;
   workspaceArtifactId?: string;
   workspaceArtifactTitle?: string;
+  hasBuildRunResult?: boolean;
+  showFullCodeInChat?: boolean;
   attachment?: ChatAttachment;
   attachments?: ChatAttachment[];
 }

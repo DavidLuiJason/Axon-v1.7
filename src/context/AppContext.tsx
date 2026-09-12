@@ -92,6 +92,7 @@ import {
   queryProjectTimeline,
 } from '../lib/projectTimeline';
 import { fileIntelligence } from '../lib/fileIntelligence';
+import { formatChatCodeResponse } from '../utils/chatCodeFormatter';
 
 interface ConfirmationConfig {
   isOpen: boolean;
@@ -223,7 +224,7 @@ interface AppContextType {
   setWorkspaceActiveTab: (tab: 'code' | 'preview') => void;
   workspaceExecutionError: FormattedTraceback | null;
   setWorkspaceExecutionError: (err: FormattedTraceback | null) => void;
-  addChatNotification: (text: string) => void;
+  addChatNotification: (text: string, hasBuildRunResult?: boolean) => void;
 
   // Automation Rules Engine (Part 5)
   automationRules: AutomationRule[];
@@ -961,7 +962,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [workspaceActiveTab, setWorkspaceActiveTab] = useState<'code' | 'preview'>('code');
   const [workspaceExecutionError, setWorkspaceExecutionError] = useState<FormattedTraceback | null>(null);
 
-  const addChatNotification = useCallback((text: string) => {
+  const addChatNotification = useCallback((text: string, hasBuildRunResult?: boolean) => {
     setMessages((prev) => [
       ...prev,
       {
@@ -971,6 +972,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         projectId: activeProjectId,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         modelUsed: 'AXON Workspace Core',
+        hasBuildRunResult: Boolean(hasBuildRunResult),
       },
     ]);
   }, [activeProjectId]);
@@ -2287,27 +2289,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           brainResult
         );
 
-        // Auto-load code into Workspace Code view immediately
-        const codeMatch = localReply.match(/```([a-zA-Z0-9_-]*)\n([\s\S]*?)```/);
-        if (codeMatch && codeMatch[2].trim()) {
-          const detectedCode = codeMatch[2].trim();
-          const rawLang = (codeMatch[1] || 'javascript').toLowerCase();
-          let lang: WorkspaceMode = 'javascript';
-          if (rawLang.includes('html') || detectedCode.includes('<html') || detectedCode.includes('<!DOCTYPE')) {
-            lang = 'html';
-          } else if (rawLang.includes('json')) {
-            lang = 'json';
-          }
-          const firstLine = detectedCode.split('\n')[0].replace(/^\/\/\s*|^<!--\s*|^#\s*/, '').trim();
-          const snippetTitle = firstLine && firstLine.length < 50 ? firstLine : `Generated ${lang.toUpperCase()}`;
-          setWorkspaceCode(detectedCode);
-          setWorkspaceMode(lang);
+        // Process code and conversational text formatting
+        const codeResult = formatChatCodeResponse(localReply, text);
+        if (codeResult.detectedCode) {
+          const firstLine = codeResult.detectedCode.split('\n')[0].replace(/^\/\/\s*|^<!--\s*|^#\s*/, '').trim();
+          const snippetTitle = firstLine && firstLine.length < 50 ? firstLine : `Generated ${codeResult.detectedLang.toUpperCase()}`;
+          setWorkspaceCode(codeResult.detectedCode);
+          setWorkspaceMode(codeResult.detectedLang);
           setWorkspaceActiveTab('code');
           setWorkspaceExecutionError(null);
           addWorkspaceSnippetHistory({
             title: snippetTitle,
-            code: detectedCode,
-            language: lang,
+            code: codeResult.detectedCode,
+            language: codeResult.detectedLang,
             source: 'chat_auto',
           });
         }
@@ -2317,10 +2311,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           {
             id: `msg-${Date.now()}-axon-local`,
             sender: 'axon',
-            text: localReply,
+            text: codeResult.displayText,
             projectId: activeProjectId,
             timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             modelUsed: 'AXON Local Core',
+            hasBuildRunResult: codeResult.hasBuildRunResult,
+            showFullCodeInChat: codeResult.showFullCodeInChat,
           },
         ]);
       } catch (localErr) {
@@ -2601,27 +2597,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
       }
 
-      // Auto-load code into Workspace Code view immediately
-      const codeMatch = finalResponseText.match(/```([a-zA-Z0-9_-]*)\n([\s\S]*?)```/);
-      if (codeMatch && codeMatch[2].trim()) {
-        const detectedCode = codeMatch[2].trim();
-        const rawLang = (codeMatch[1] || 'javascript').toLowerCase();
-        let lang: WorkspaceMode = 'javascript';
-        if (rawLang.includes('html') || detectedCode.includes('<html') || detectedCode.includes('<!DOCTYPE')) {
-          lang = 'html';
-        } else if (rawLang.includes('json')) {
-          lang = 'json';
-        }
-        const firstLine = detectedCode.split('\n')[0].replace(/^\/\/\s*|^<!--\s*|^#\s*/, '').trim();
-        const snippetTitle = firstLine && firstLine.length < 50 ? firstLine : `Generated ${lang.toUpperCase()}`;
-        setWorkspaceCode(detectedCode);
-        setWorkspaceMode(lang);
+      // Process code and conversational text formatting
+      const codeResult = formatChatCodeResponse(finalResponseText, text);
+      if (codeResult.detectedCode) {
+        const firstLine = codeResult.detectedCode.split('\n')[0].replace(/^\/\/\s*|^<!--\s*|^#\s*/, '').trim();
+        const snippetTitle = firstLine && firstLine.length < 50 ? firstLine : `Generated ${codeResult.detectedLang.toUpperCase()}`;
+        setWorkspaceCode(codeResult.detectedCode);
+        setWorkspaceMode(codeResult.detectedLang);
         setWorkspaceActiveTab('code');
         setWorkspaceExecutionError(null);
         addWorkspaceSnippetHistory({
           title: snippetTitle,
-          code: detectedCode,
-          language: lang,
+          code: codeResult.detectedCode,
+          language: codeResult.detectedLang,
           source: 'chat_auto',
         });
       }
@@ -2631,11 +2619,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         {
           id: `msg-${Date.now()}-reply`,
           sender: 'axon',
-          text: finalResponseText,
+          text: codeResult.displayText,
           projectId: activeProjectId,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           modelUsed: activeModel.name,
           accountUsed: currentAccount?.label,
+          hasBuildRunResult: codeResult.hasBuildRunResult,
+          showFullCodeInChat: codeResult.showFullCodeInChat,
         },
       ]);
     } catch (err) {
@@ -2659,27 +2649,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           brainResult
         );
 
-        // Auto-load code into Workspace Code view immediately
-        const codeMatch = offlineReply.match(/```([a-zA-Z0-9_-]*)\n([\s\S]*?)```/);
-        if (codeMatch && codeMatch[2].trim()) {
-          const detectedCode = codeMatch[2].trim();
-          const rawLang = (codeMatch[1] || 'javascript').toLowerCase();
-          let lang: WorkspaceMode = 'javascript';
-          if (rawLang.includes('html') || detectedCode.includes('<html') || detectedCode.includes('<!DOCTYPE')) {
-            lang = 'html';
-          } else if (rawLang.includes('json')) {
-            lang = 'json';
-          }
-          const firstLine = detectedCode.split('\n')[0].replace(/^\/\/\s*|^<!--\s*|^#\s*/, '').trim();
-          const snippetTitle = firstLine && firstLine.length < 50 ? firstLine : `Generated ${lang.toUpperCase()}`;
-          setWorkspaceCode(detectedCode);
-          setWorkspaceMode(lang);
+        // Process code and conversational text formatting
+        const offlineCodeResult = formatChatCodeResponse(offlineReply, text);
+        if (offlineCodeResult.detectedCode) {
+          const firstLine = offlineCodeResult.detectedCode.split('\n')[0].replace(/^\/\/\s*|^<!--\s*|^#\s*/, '').trim();
+          const snippetTitle = firstLine && firstLine.length < 50 ? firstLine : `Generated ${offlineCodeResult.detectedLang.toUpperCase()}`;
+          setWorkspaceCode(offlineCodeResult.detectedCode);
+          setWorkspaceMode(offlineCodeResult.detectedLang);
           setWorkspaceActiveTab('code');
           setWorkspaceExecutionError(null);
           addWorkspaceSnippetHistory({
             title: snippetTitle,
-            code: detectedCode,
-            language: lang,
+            code: offlineCodeResult.detectedCode,
+            language: offlineCodeResult.detectedLang,
             source: 'chat_auto',
           });
         }
@@ -2689,10 +2671,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           {
             id: `msg-${Date.now()}-local-core`,
             sender: 'axon',
-            text: offlineReply,
+            text: offlineCodeResult.displayText,
             projectId: activeProjectId,
             timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             modelUsed: 'AXON Local Core',
+            hasBuildRunResult: offlineCodeResult.hasBuildRunResult,
+            showFullCodeInChat: offlineCodeResult.showFullCodeInChat,
           },
         ]);
       } catch (localErr) {

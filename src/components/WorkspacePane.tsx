@@ -364,6 +364,7 @@ export const WorkspacePane: React.FC = () => {
       setHtmlConsoleLogs([]);
       setIsRunning(false);
       setWorkspaceActiveTab('preview');
+      addChatNotification('HTML document built and rendered in Preview.', true);
       showToast('Document rendered in Preview');
       return;
     }
@@ -384,6 +385,7 @@ export const WorkspacePane: React.FC = () => {
           },
         ]);
         setWorkspaceActiveTab('preview');
+        addChatNotification(`JSON parsed and validated successfully in ${elapsed}ms.`, true);
         showToast(`JSON parsed successfully in ${elapsed}ms`);
       } catch (err: any) {
         const traceback = formatPyDroidTraceback(err, workspaceCode, 'json');
@@ -464,6 +466,7 @@ export const WorkspacePane: React.FC = () => {
       ]);
 
       setWorkspaceActiveTab('preview');
+      addChatNotification(`Script executed successfully in ${elapsed}ms. Results ready in Preview.`, true);
       showToast(`Executed in ${elapsed}ms`);
     } catch (err: any) {
       // Format Python / PyDroid-3 style readable traceback
